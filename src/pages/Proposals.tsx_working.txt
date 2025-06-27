@@ -188,7 +188,7 @@ const Proposals = () => {
         {showModal && (
           <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
             <div className="bg-white dark:bg-card p-6 rounded-lg shadow-lg w-full max-w-md">
-              <h2 className="text-lg font-bold mb-4 text-black">Create Proposal</h2>
+              <h2 className="text-lg font-bold mb-4">Create Proposal</h2>
               <div className="space-y-3">
                 <Input
                   placeholder="Targets (comma-separated addresses)"

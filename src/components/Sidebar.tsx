@@ -15,7 +15,7 @@ const Sidebar = () => {
   const location = useLocation();
 
   return (
-    <div className="w-64 h-screen bg-sidebar border-r border-sidebar-border flex flex-col fixed left-0 top-0 z-50">
+    <div className="w-64 h-screen bg-sidebar border-r border-sidebar-border flex flex-col ">
       {/* Logo/Brand */}
       <div className="p-6 border-b border-sidebar-border">
         <div className="flex items-center gap-3">
