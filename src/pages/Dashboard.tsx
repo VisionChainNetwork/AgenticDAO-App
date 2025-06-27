@@ -8,35 +8,6 @@ import { QuickActionsCard } from "@/components/DashboardCards";
 
 const Dashboard = () => {
   return (
-    // <Layout>
-    //   <div className="space-y-8">
-    //     {/* Header */}
-    //     <div>
-    //       <h1 className="text-3xl font-bold gradient-text">
-    //         VisionChain Agent DAO
-    //       </h1>
-    //       <p className="text-muted-foreground mt-2">
-    //         Decentralized governance for autonomous agents
-    //       </p>
-    //     </div>
-
-    //     {/* Stats Cards */}
-    //     <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-    //       <TreasuryCard />
-    //       <VotingStatsCard />
-    //       <QuickActionsCard />
-    //     </div>
-
-    //     {/* Main Content */}
-    //     <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-    //       <AgentActivityCard />
-    //       <RecentEventsCard />
-    //     </div>
-    //   </div>
-    // </Layout>
-
-
-    //new code
     <Layout>
       <div className="space-y-8">
         {/* Hero Section */}

@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Bell, Search, Wallet } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
+import { ConnectButton } from "@rainbow-me/rainbowkit";
 
 const Header = () => {
   return (
@@ -18,11 +18,12 @@ const Header = () => {
         </Button>
 
         {/* Wallet Connect */}
-        <Button className="bg-gradient-to-r from-dao-primary to-dao-secondary hover:from-dao-primary/90 hover:to-dao-secondary/90 gap-2">
+         <ConnectButton />
+        {/* <Button className="bg-gradient-to-r from-dao-primary to-dao-secondary hover:from-dao-primary/90 hover:to-dao-secondary/90 gap-2">
           <Wallet className="w-4 h-4" />
           <span className="hidden sm:inline">0x1234...5678</span>
           <span className="sm:hidden">Connected</span>
-        </Button>
+        </Button> */}
       </div>
     </header>
   );
