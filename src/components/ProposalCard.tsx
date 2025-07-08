@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,29 +23,46 @@ import {
   TrendingUp,
   ExternalLink,
 } from "lucide-react";
+import { ethers } from "ethers";
+import { formatUnits } from "ethers";
+import { DAO_ABI } from "../contracts/daoAbi";
 
 interface ProposalCardProps {
   proposal: {
-    id: number;
+    id: string;
     title: string;
     description: string;
-    status: "active" | "passed" | "failed";
+    status: string;
     votesFor: number;
     votesAgainst: number;
     votesAbstain: number;
     totalVotes: number;
-    timeLeft: string;
     proposer: string;
     created: string;
     category: string;
+    hasVoted?: boolean;
+    endTime: number;
+    targets: string[];
+    values: string[];
+    calldatas: string[];
+    executed?: boolean;
   };
+  onVote: (proposalId: string, voteType: number) => Promise<void>;
+  onExecute: (proposalId: string) => Promise<void>;
 }
 
-const ProposalCard = ({ proposal }: ProposalCardProps) => {
-  const [selectedVote, setSelectedVote] = useState<
-    "for" | "against" | "abstain" | null
-  >(null);
+// const CONTRACT_ADDRESS = "0xfcD20928f417Dd81456183fBeD5776C608ECe6C3";
+const CONTRACT_ADDRESS = "0x2EF22f0a1F2fFf6a03DD612954773386fDC87f95"; //new
+const RPC_URL = "http://10.10.10.66:40000";
+
+const ProposalCard = ({ proposal, onVote, onExecute }: ProposalCardProps) => {
   const [isVoting, setIsVoting] = useState(false);
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [selectedVote, setSelectedVote] = useState<number | null>(null);
+  const [deadlines, setDeadlines] = useState({}); // { [proposalId]: deadline }
+  const [proposals, setProposals] = useState([]);
+  const [userVotes, setUserVotes] = useState<{ [proposalId: string]: boolean }>({});
+  const [proposalStates, setProposalStates] = useState<{ [id: string]: number }>({});
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -71,15 +88,144 @@ const ProposalCard = ({ proposal }: ProposalCardProps) => {
     return colors[category] || "bg-muted text-muted-foreground";
   };
 
-  const handleVote = async (voteType: "for" | "against" | "abstain") => {
-    setIsVoting(true);
-    // Simulate voting process
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+  const handleVoteClick = (voteType: number) => {
+    console.log("Vote clicked:", { voteType, proposalId: proposal.id });
     setSelectedVote(voteType);
-    setIsVoting(false);
+    setShowConfirmation(true);
   };
 
-  const isActive = proposal.status === "active";
+  const handleConfirmVote = async () => {
+    if (selectedVote === null) return;
+    
+    console.log("Confirming vote:", {
+      proposalId: proposal.id,
+      voteType: selectedVote
+    });
+
+    setIsVoting(true);
+    try {
+      if (!window.ethereum) {
+        alert("Please install MetaMask!");
+        return;
+      }
+
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      await provider.send("eth_requestAccounts", []);
+      const signer = await provider.getSigner();
+      const signerAddress = await signer.getAddress();
+
+      
+
+      // 1. Check on-chain if the user has already voted
+      const contract = new ethers.Contract(CONTRACT_ADDRESS, DAO_ABI, provider);
+      const alreadyVoted = await contract.hasVoted(proposal.id, signerAddress);
+      if (alreadyVoted) {
+        alert("You have already voted on this proposal.");
+        return;
+      }
+
+      await onVote(proposal.id, selectedVote);
+      setShowConfirmation(false);
+    } catch (error) {
+      console.error("Error in handleConfirmVote:", error);
+    } finally {
+      setIsVoting(false);
+      setSelectedVote(null);
+    }
+  };
+
+  // Calculate vote percentages
+  const votesForTokens = Number(formatUnits(proposal.votesFor.toString(), 18));
+  const votesAgainstTokens = Number(formatUnits(proposal.votesAgainst.toString(), 18));
+  const votesAbstainTokens = Number(formatUnits(proposal.votesAbstain.toString(), 18));
+  const totalVotesTokens = votesForTokens + votesAgainstTokens + votesAbstainTokens;
+  const forPercent = totalVotesTokens > 0 ? (votesForTokens / totalVotesTokens) * 100 : 0;
+  const againstPercent = totalVotesTokens > 0 ? (votesAgainstTokens / totalVotesTokens) * 100 : 0;
+  const abstainPercent = totalVotesTokens > 0 ? (votesAbstainTokens / totalVotesTokens) * 100 : 0;
+
+  const handleExecute = async () => {
+    if (!window.ethereum) {
+      alert("Please install MetaMask!");
+      return;
+    }
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      await provider.send("eth_requestAccounts", []);
+      const signer = await provider.getSigner();
+      const contract = new ethers.Contract(CONTRACT_ADDRESS, DAO_ABI, signer);
+
+      const tx = await contract.execute(
+        proposal.targets,
+        proposal.values,
+        proposal.calldatas,
+        ethers.keccak256(ethers.toUtf8Bytes(proposal.description))
+      );
+      await tx.wait();
+
+      if (onExecute) {
+        await onExecute(proposal.id);
+      }
+
+      alert("Proposal executed!");
+    } catch (err) {
+      alert("Error executing proposal: " + (err as any).message);
+    }
+  };
+
+  const now = Date.now();
+  const canExecute = now > Number(proposal.endTime);
+
+  useEffect(() => {
+    const fetchDeadlines = async () => {
+      const provider = new ethers.JsonRpcProvider(RPC_URL);
+      const contract = new ethers.Contract(CONTRACT_ADDRESS, DAO_ABI, provider);
+
+      const newDeadlines = {};
+      for (const proposal of proposals) {
+        const proposalDeadline = await contract.proposalDeadline(proposal.id);
+        console.log("proposalDeadline", proposalDeadline);
+        const endTime = Number(proposalDeadline) * 1000;
+        console.log("endTime", endTime);
+        newDeadlines[proposal.id] = endTime;
+      }
+      setDeadlines(newDeadlines);
+    };
+
+    fetchDeadlines();
+  }, [proposals]);
+
+  useEffect(() => {
+    const fetchVotes = async () => {
+      if (!window.ethereum) return;
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      const userAddress = await signer.getAddress();
+      const contract = new ethers.Contract(CONTRACT_ADDRESS, DAO_ABI, provider);
+
+      const votes: { [proposalId: string]: boolean } = {};
+      for (const proposal of proposals) {
+        // Replace with your contract's method
+        const receipt = await contract.getReceipt(proposal.id, userAddress);
+        votes[proposal.id] = receipt.hasVoted; // or adjust as needed
+      }
+      setUserVotes(votes);
+    };
+
+    fetchVotes();
+  }, [proposals]);
+
+  useEffect(() => {
+    const fetchStates = async () => {
+      const provider = new ethers.JsonRpcProvider(RPC_URL);
+      const contract = new ethers.Contract(CONTRACT_ADDRESS, DAO_ABI, provider);
+      const states: { [id: string]: number } = {};
+      for (const proposal of proposals) {
+        states[proposal.id] = await contract.state(proposal.id);
+      }
+      setProposalStates(states);
+    };
+    fetchStates();
+  }, [proposals]);
 
   return (
     <div className="group">
@@ -98,7 +244,7 @@ const ProposalCard = ({ proposal }: ProposalCardProps) => {
                 >
                   {proposal.category}
                 </Badge>
-                {isActive && (
+                {proposal.status === "active" && (
                   <Badge
                     variant="outline"
                     className="text-dao-warning border-dao-warning/30"
@@ -138,7 +284,7 @@ const ProposalCard = ({ proposal }: ProposalCardProps) => {
             </div>
             <div className="flex items-center gap-1">
               <TrendingUp className="w-3 h-3" />
-              {proposal.totalVotes} votes
+              {formatUnits(proposal.totalVotes.toString(), 18)} total votes
             </div>
           </div>
         </CardHeader>
@@ -149,7 +295,7 @@ const ProposalCard = ({ proposal }: ProposalCardProps) => {
             <div className="flex justify-between items-center">
               <span className="text-sm font-medium">Voting Results</span>
               <span className="text-sm text-muted-foreground">
-                {proposal.totalVotes} total votes
+                {formatUnits(proposal.totalVotes.toString(), 18)} total votes
               </span>
             </div>
 
@@ -161,12 +307,12 @@ const ProposalCard = ({ proposal }: ProposalCardProps) => {
                     <ThumbsUp className="w-3 h-3" />
                     For
                   </span>
-                  <span>{proposal.votesFor}%</span>
+                  <span>For: {forPercent.toFixed(2)}%</span>
                 </div>
-                <Progress value={proposal.votesFor} className="h-2 bg-muted">
+                <Progress value={forPercent} className="h-2 bg-muted">
                   <div
                     className="h-full bg-dao-success transition-all duration-300"
-                    style={{ width: `${proposal.votesFor}%` }}
+                    style={{ width: `${forPercent}%` }}
                   />
                 </Progress>
               </div>
@@ -178,15 +324,15 @@ const ProposalCard = ({ proposal }: ProposalCardProps) => {
                     <ThumbsDown className="w-3 h-3" />
                     Against
                   </span>
-                  <span>{proposal.votesAgainst}%</span>
+                  <span>Against: {againstPercent.toFixed(2)}%</span>
                 </div>
                 <Progress
-                  value={proposal.votesAgainst}
+                  value={againstPercent}
                   className="h-2 bg-muted"
                 >
                   <div
                     className="h-full bg-dao-danger transition-all duration-300"
-                    style={{ width: `${proposal.votesAgainst}%` }}
+                    style={{ width: `${againstPercent}%` }}
                   />
                 </Progress>
               </div>
@@ -198,15 +344,15 @@ const ProposalCard = ({ proposal }: ProposalCardProps) => {
                     <Minus className="w-3 h-3" />
                     Abstain
                   </span>
-                  <span>{proposal.votesAbstain}%</span>
+                  <span>Abstain: {abstainPercent.toFixed(2)}%</span>
                 </div>
                 <Progress
-                  value={proposal.votesAbstain}
+                  value={abstainPercent}
                   className="h-2 bg-muted"
                 >
                   <div
                     className="h-full bg-muted-foreground transition-all duration-300"
-                    style={{ width: `${proposal.votesAbstain}%` }}
+                    style={{ width: `${abstainPercent}%` }}
                   />
                 </Progress>
               </div>
@@ -216,15 +362,15 @@ const ProposalCard = ({ proposal }: ProposalCardProps) => {
           <Separator />
 
           {/* Voting Buttons */}
-          {isActive && (
+          {proposal.status === "active" && !userVotes[proposal.id] && (
             <div className="space-y-3">
               <div className="flex gap-2">
-                <Dialog>
+                <Dialog open={showConfirmation} onOpenChange={setShowConfirmation}>
                   <DialogTrigger asChild>
                     <Button
                       variant="outline"
                       className="flex-1 hover:bg-dao-success/10 hover:border-dao-success hover:text-dao-success"
-                      onClick={() => setSelectedVote("for")}
+                      onClick={() => handleVoteClick(1)}
                     >
                       <ThumbsUp className="w-4 h-4 mr-2" />
                       Vote For
@@ -239,9 +385,9 @@ const ProposalCard = ({ proposal }: ProposalCardProps) => {
                       </DialogDescription>
                     </DialogHeader>
                     <DialogFooter>
-                      <Button variant="outline">Cancel</Button>
+                      <Button variant="outline" onClick={() => setShowConfirmation(false)}>Cancel</Button>
                       <Button
-                        onClick={() => handleVote("for")}
+                        onClick={handleConfirmVote}
                         disabled={isVoting}
                         className="bg-dao-success hover:bg-dao-success/90"
                       >
@@ -256,7 +402,7 @@ const ProposalCard = ({ proposal }: ProposalCardProps) => {
                     <Button
                       variant="outline"
                       className="flex-1 hover:bg-dao-danger/10 hover:border-dao-danger hover:text-dao-danger"
-                      onClick={() => setSelectedVote("against")}
+                      onClick={() => handleVoteClick(0)}
                     >
                       <ThumbsDown className="w-4 h-4 mr-2" />
                       Vote Against
@@ -273,7 +419,7 @@ const ProposalCard = ({ proposal }: ProposalCardProps) => {
                     <DialogFooter>
                       <Button variant="outline">Cancel</Button>
                       <Button
-                        onClick={() => handleVote("against")}
+                        onClick={handleConfirmVote}
                         disabled={isVoting}
                         className="bg-dao-danger hover:bg-dao-danger/90"
                       >
@@ -288,7 +434,7 @@ const ProposalCard = ({ proposal }: ProposalCardProps) => {
                     <Button
                       variant="outline"
                       className="hover:bg-muted/50"
-                      onClick={() => setSelectedVote("abstain")}
+                      onClick={() => handleVoteClick(2)}
                     >
                       <Minus className="w-4 h-4 mr-1" />
                       Abstain
@@ -305,7 +451,7 @@ const ProposalCard = ({ proposal }: ProposalCardProps) => {
                     <DialogFooter>
                       <Button variant="outline">Cancel</Button>
                       <Button
-                        onClick={() => handleVote("abstain")}
+                        onClick={handleConfirmVote}
                         disabled={isVoting}
                         variant="secondary"
                       >
@@ -316,22 +462,32 @@ const ProposalCard = ({ proposal }: ProposalCardProps) => {
                 </Dialog>
               </div>
 
-              {selectedVote && (
+              {selectedVote !== null && (
                 <div className="p-3 rounded-lg bg-dao-success/10 border border-dao-success/30 text-center">
                   <p className="text-sm text-dao-success font-medium">
-                    ✓ You voted {selectedVote.toUpperCase()} on this proposal
+                    ✓ You voted {selectedVote === 1 ? "For" : selectedVote === 0 ? "Against" : "Abstain"} on this proposal
                   </p>
                 </div>
               )}
             </div>
           )}
 
-          {!isActive && (
+          {!proposal.status === "active" && (
             <div className="text-center py-2">
               <p className="text-sm text-muted-foreground">
                 Voting has ended for this proposal
               </p>
             </div>
+          )}
+
+          {Date.now() > proposal.endTime && !proposal.executed && (
+            <Button onClick={handleExecute}>
+              Execute
+            </Button>
+          )}
+
+          {proposal.executed && (
+            <Badge className="bg-dao-success text-white">Executed</Badge>
           )}
         </CardContent>
       </Card>

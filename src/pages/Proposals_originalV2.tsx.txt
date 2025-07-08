@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Layout from "@/components/Layout";
 import ProposalCard from "@/components/ProposalCard";
 import { Button } from "@/components/ui/button";
@@ -13,26 +13,10 @@ import {
 } from "@/components/ui/select";
 import { Search, Filter, Plus } from "lucide-react";
 import { DAO_ABI } from "../contracts/daoAbi";
-import { ethers, parseUnits, formatUnits } from "ethers";
-import { VCN_TOKEN_ABI } from "../contracts/vcnTokenAbi";
+import { ethers } from "ethers";
 
-// Helper to get proposals from localStorage
-function getProposalsFromStorage() {
-  const data = localStorage.getItem("proposals");
-  return data ? JSON.parse(data) : [];
-}
-
-// Helper to save proposals to localStorage
-function saveProposalsToStorage(proposals: any[]) {
-  localStorage.setItem("proposals", JSON.stringify(proposals));
-}
-
-// const CONTRACT_ADDRESS = "0xfcD20928f417Dd81456183fBeD5776C608ECe6C3";
-const CONTRACT_ADDRESS = "0x2EF22f0a1F2fFf6a03DD612954773386fDC87f95"; //new
+const CONTRACT_ADDRESS = "0x012246142427448882252AdcAddF7c04b6B249B2";
 const RPC_URL = "http://10.10.10.66:40000";
-// const VCN_TOKEN_ADDRESS = "0x9c9d406f0f6676C5a5B1625A3178064E65B631aB";
-const VCN_TOKEN_ADDRESS = "0xAc87Bd4c9953B0BDA45E997306341021535D9C82"; //new
-
 
 const mockProposals = [
   {
@@ -122,25 +106,8 @@ const Proposals = () => {
   const [calldatas, setCalldatas] = useState("");
   const [description, setDescription] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [proposals, setProposals] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
 
-  // Only load proposals from localStorage once on mount
-  useEffect(() => {
-    setLoading(true);
-    const proposals = getProposalsFromStorage();
-    console.log("Loaded proposals from storage:", proposals);
-    setProposals(proposals);
-    setLoading(false);
-  }, []);
-
-  // Add this to your Proposals.tsx to check the stored proposals
-  useEffect(() => {
-    const storedProposals = localStorage.getItem('proposals');
-    console.log('Current stored proposals:', JSON.parse(storedProposals || '[]'));
-  }, []);
-
-  const filteredProposals = proposals.filter((proposal) => {
+  const filteredProposals = mockProposals.filter((proposal) => {
     const matchesSearch = proposal.title
       .toLowerCase()
       .includes(searchTerm.toLowerCase());
@@ -153,10 +120,10 @@ const Proposals = () => {
   });
 
   const statusCounts = {
-    all: proposals.length,
-    active: proposals.filter((p) => p.status === "active").length,
-    passed: proposals.filter((p) => p.status === "passed").length,
-    failed: proposals.filter((p) => p.status === "failed").length,
+    all: mockProposals.length,
+    active: mockProposals.filter((p) => p.status === "active").length,
+    passed: mockProposals.filter((p) => p.status === "passed").length,
+    failed: mockProposals.filter((p) => p.status === "failed").length,
   };
 
   const provider = new ethers.JsonRpcProvider(RPC_URL);
@@ -177,159 +144,25 @@ const Proposals = () => {
       const signer = await provider.getSigner();
 
       // Prepare proposal data
-      const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
-      const targetsArr = targets
-        .split(",")
-        .map(s => s.trim())
-        .filter(s => s.length > 0);
-
-      if (targetsArr.length === 0) {
-        targetsArr.push(ZERO_ADDRESS);
-      }
+      const targetsArr = targets.split(",").map(s => s.trim());
       const valuesArr = values.split(",").map(s => Number(s.trim()));
       const calldatasArr = calldatas.split(",").map(s => s.trim() || "0x");
 
       // Create contract instance with signer
       const contract = new ethers.Contract(CONTRACT_ADDRESS, DAO_ABI, signer);
 
-      const vcnToken = new ethers.Contract(VCN_TOKEN_ADDRESS, VCN_TOKEN_ABI, signer);
-      const currentBlock = await provider.getBlockNumber();
-      // const votingPower = await vcnToken.getPastVotes(await signer.getAddress(), 0);
-
-      // if (votingPower.eq(0)) {
-      //   alert("You have no voting power for this proposal. Please delegate your tokens before the proposal is created.");
-      //   return;
-      // }
-
       const tx = await contract.propose(targetsArr, valuesArr, calldatasArr, description);
-      const receipt = await tx.wait();
+      await tx.wait();
+      alert("Proposal submitted! Tx: " + tx.hash);
 
-      // Get the proposal ID from the event
-      const event = receipt.logs.find((log: any) => log.eventName === 'ProposalCreated');
-      const proposalId = event?.args?.proposalId?.toString();
-
-      if (!proposalId) {
-        throw new Error("Failed to get proposal ID from transaction");
-      }
-
-      // Get the proposal deadline from the contract (returns seconds)
-      const proposalDeadline = await contract.proposalDeadline(proposalId);
-      // Convert to ms for JS Date compatibility
-      const endTime = Number(proposalDeadline) * 1000;
-
-      const newProposal = {
-        id: proposalId,
-        title: description.split(":")[0] || "Proposal",
-        description,
-        status: "active",
-        votesFor: 0,
-        votesAgainst: 0,
-        votesAbstain: 0,
-        totalVotes: 0,
-        proposer: await signer.getAddress(),
-        created: new Date().toLocaleString(),
-        category: "General",
-        hasVoted: false,
-        endTime,
-        creationBlock: currentBlock,
-        targets: targetsArr,
-        values: valuesArr,
-        calldatas: calldatasArr,
-        executed: false,
-      };
-
-      const updatedProposals = [newProposal, ...proposals];
-      saveProposalsToStorage(updatedProposals);
-      setProposals(updatedProposals);
-
+      // Only close the modal after the transaction is sent
       setShowModal(false);
     } catch (err) {
       alert("Error submitting proposal: " + (err as any).message);
+      // Modal stays open if there is an error or user rejects
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  const handleVote = async (proposalId: string, voteType: number) => {
-    if (!window.ethereum) {
-      alert("Please install MetaMask!");
-      return;
-    }
-
-    try {
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      await provider.send("eth_requestAccounts", []);
-      const signer = await provider.getSigner();
-      const signerAddress = await signer.getAddress();
-
-      // Find the proposal object by id
-      const proposal = proposals.find(p => p.id === proposalId);
-      if (!proposal) {
-        alert("Proposal not found.");
-        return;
-      }
-
-      // 1. Delegate voting power to self
-      const vcnToken = new ethers.Contract(VCN_TOKEN_ADDRESS, VCN_TOKEN_ABI, signer);
-      // const delegateTx = await vcnToken.delegate(signerAddress);
-      // await delegateTx.wait();
-
-      // 2. Proceed to vote on the proposal
-      const contract = new ethers.Contract(CONTRACT_ADDRESS, DAO_ABI, signer);
-
-      console.log("Casting vote:", {
-        proposalId: proposalId,
-        voteType: voteType
-      });
-
-      // const votingPower = await vcnToken.getPastVotes(signerAddress, proposal.creationBlock);
-      const votingPower = await vcnToken.getVotes(signerAddress);
-      console.log("votingPower: ", votingPower);
-      if (votingPower === 0n || votingPower === 0) {
-        alert("You have no voting power for this proposal. You must have delegated before the proposal was created.");
-        return;
-      }
-
-      console.log("casting vote: ", proposalId);
-      const tx = await contract.castVote(
-        proposalId,
-        voteType
-      );
-
-      const receipt = await tx.wait();
-
-      // Update the local state and storage after successful vote
-      const updatedProposals = proposals.map(p => {
-        if (p.id === proposalId) {
-          return {
-            ...p,
-            hasVoted: true,
-            votesFor: voteType === 1 ? (BigInt(p.votesFor) + BigInt(votingPower)).toString() : p.votesFor,
-            votesAgainst: voteType === 0 ? (BigInt(p.votesAgainst) + BigInt(votingPower)).toString() : p.votesAgainst,
-            totalVotes: (BigInt(p.totalVotes) + BigInt(votingPower)).toString()
-          };
-        }
-        return p;
-      });
-
-      setProposals(updatedProposals);
-      saveProposalsToStorage(updatedProposals);
-
-      alert("Vote cast successfully!");
-    } catch (err) {
-      console.error("Error casting vote:", err);
-      alert("Error casting vote: " + (err as any).message);
-    }
-  };
-
-  const handleExecute = async (proposalId) => {
-    const updatedProposals = proposals.map(p =>
-      p.id === proposalId
-        ? { ...p, executed: true, status: "executed" } // update both fields
-        : p
-    );
-    setProposals(updatedProposals);
-    saveProposalsToStorage(updatedProposals);
   };
 
   return (
@@ -455,49 +288,12 @@ const Proposals = () => {
 
         {/* Proposals Grid */}
         <div className="grid gap-6">
-          {loading ? (
-            <div>Loading proposals...</div>
-          ) : filteredProposals.length > 0 ? (
-            filteredProposals.map((proposal) => {
-              const votesFor = BigInt(proposal.votesFor);
-              const votesAgainst = BigInt(proposal.votesAgainst);
-              const totalVotes = BigInt(proposal.totalVotes);
-
-              // Convert BigInt/BigNumber to human-readable numbers
-              const votesForTokens = Number(formatUnits(votesFor, 18));
-              const votesAgainstTokens = Number(formatUnits(votesAgainst, 18));
-              const votesAbstainTokens = Number(formatUnits(proposal.votesAbstain ?? 0, 18));
-              const totalVotesTokens = votesForTokens + votesAgainstTokens + votesAbstainTokens;
-
-              const forPercent = totalVotesTokens > 0 ? (votesForTokens / totalVotesTokens) * 100 : 0;
-              const againstPercent = totalVotesTokens > 0 ? (votesAgainstTokens / totalVotesTokens) * 100 : 0;
-              const abstainPercent = totalVotesTokens > 0 ? (votesAbstainTokens / totalVotesTokens) * 100 : 0;
-
-              return (
-                <div key={proposal.id}>
-                  <ProposalCard 
-                    proposal={proposal} 
-                    onVote={handleVote}
-                    onExecute={handleExecute}
-                  />
-                  <span>
-                    For: {forPercent.toFixed(2)}%
-                  </span>
-                  <span>
-                    Against: {againstPercent.toFixed(2)}%
-                  </span>
-                  <span>
-                    Abstain: {abstainPercent.toFixed(2)}%
-                  </span>
-                  <span>
-                    Total votes: {totalVotesTokens}
-                  </span>
-                  {proposal.status === "executed" && (
-                    <Badge className="bg-dao-success text-white">Executed</Badge>
-                  )}
-                </div>
-              );
-            })
+          {filteredProposals.length > 0 ? (
+            filteredProposals.map((proposal, index) => (
+              <div key={proposal.id}>
+                <ProposalCard proposal={proposal} />
+              </div>
+            ))
           ) : (
             <div className="text-center py-12">
               <div className="w-16 h-16 mx-auto mb-4 bg-muted rounded-full flex items-center justify-center">
